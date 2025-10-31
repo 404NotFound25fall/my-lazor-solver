@@ -29,18 +29,20 @@ def get_block_at_position(board: Board, row: int, col: int) -> Block | None:
 def _block_ch_at(board: Board, r: int, c: int) -> Optional[str]:
     if not board.in_bounds(r, c):
         return None
-    # 1) 动态放置的块：grid 中的小写 a/b/c
+    # 1) 网格中的标记（支持 'a', 'b', 'c', 'd'）
     try:
         gch = board.grid[r][c]
-        if isinstance(gch, str) and gch.lower() in ("a", "b", "c"):
-            return gch.lower()
+        if isinstance(gch, str):
+            if gch.lower() in {'a', 'b', 'c', 'd'}:
+                return gch.lower()
     except Exception:
         pass
-    # 2) 固定块：fixed_blocks 字典
+
+    # 2) fixed_blocks 作为兜底
     blk = board.fixed_blocks.get((r, c))
     if blk:
         if blk.kind is BlockType.REFLECT:
-            return 'a'
+            return 'a'  # 固定块默认 '/' 朝向
         if blk.kind is BlockType.OPAQUE:
             return 'b'
         if blk.kind is BlockType.REFRACT:
@@ -48,22 +50,47 @@ def _block_ch_at(board: Board, r: int, c: int) -> Optional[str]:
     return None
 
 
-def _reflect_by_boundary(vx: int, vy: int, boundary: str) -> Tuple[int, int]:
-    # boundary in {"vertical", "horizontal"}
-    if boundary == "vertical":
-        return (-vx, vy)
-    return (vx, -vy)
+def _reflect_slash(vx: int, vy: int) -> Tuple[int, int]:
+    """'/' 朝向的镜面反射：围绕 y=-x 反射"""
+    return (-vy, -vx)
+
+
+def _reflect_backslash(vx: int, vy: int) -> Tuple[int, int]:
+    """'\' 朝向的镜面反射：围绕 y=+x 反射"""
+    return (vy, vx)
 
 
 def _interact(block_ch: str, vx: int, vy: int, boundary: str) -> List[Tuple[int, int]]:
-    # a=reflect, b=opaque, c=refract
+    """
+    方块与激光的交互：
+    - 'a' = A（反射块 '/'）：镜面反射 (-vy, -vx)
+    - 'd' = A（反射块 '\'）：镜面反射 (vy, vx)
+    - 'b' = opaque（不透明块）：吸收激光
+    - 'c' = refract（折射块）：直行 + 轴对齐反射
+    """
     if block_ch == 'b':
-        return []
+        return []  # 吸收，无出射光束
+
     if block_ch == 'a':
-        return [_reflect_by_boundary(vx, vy, boundary)]
+        # A："/" 朝向 - 镜面反射
+        return [_reflect_slash(vx, vy)]
+
+    if block_ch == 'd':
+        # A："\" 朝向 - 镜面反射
+        return [_reflect_backslash(vx, vy)]
+
     if block_ch == 'c':
-        return [(vx, vy), _reflect_by_boundary(vx, vy, boundary)]
-    return [(vx, vy)]
+        # 折射：直行 + 反射（反射部分仍按边界翻分量，轴对齐规则）
+        passing = (vx, vy)
+        if boundary == "vertical":
+            reflected = (-vx, vy)
+        elif boundary == "horizontal":
+            reflected = (vx, -vy)
+        else:
+            reflected = (-vx, -vy)
+        return [passing, reflected]
+
+    return [(vx, vy)]  # 默认直行（无块）
 
 
 def _block_across_vertical_edge(board: Board, mx: int, y: int, vy: int) -> Optional[str]:
@@ -114,22 +141,30 @@ def _step_and_collide(board: Board, x: int, y: int, vx: int, vy: int) -> Tuple[i
     my = (y + ny) // 2
     interactions: List[Tuple[str, str]] = []  # (boundary, block_ch)
 
-    # diagonal first: check vertical then horizontal in fixed order
-    if vx != 0 and vy != 0:
-        blk_v = _block_across_vertical_edge(board, mx, y, vy)
-        if blk_v:
-            interactions.append(("vertical", blk_v))
-        blk_h = _block_across_horizontal_edge(board, x, my, vx)
-        if blk_h:
-            interactions.append(("horizontal", blk_h))
-    elif vx != 0:
-        blk_v = _block_across_vertical_edge(board, mx, y, vy)
-        if blk_v:
-            interactions.append(("vertical", blk_v))
-    elif vy != 0:
-        blk_h = _block_across_horizontal_edge(board, x, my, vx)
-        if blk_h:
-            interactions.append(("horizontal", blk_h))
+    hit_vertical = (mx % 2 == 1)
+    hit_horizontal = (my % 2 == 1)
+
+    if hit_vertical and hit_horizontal:
+        corner_block = _block_ch_at(board, (my - 1) // 2, (mx - 1) // 2)
+        if not corner_block:
+            # 若无法直接获取角点方块，则退回边界检测结果
+            blk_v = _block_across_vertical_edge(board, mx, y, vy)
+            blk_h = _block_across_horizontal_edge(board, x, my, vx)
+            if blk_v:
+                interactions.append(("vertical", blk_v))
+            if blk_h:
+                interactions.append(("horizontal", blk_h))
+        else:
+            interactions.append(("corner", corner_block))
+    else:
+        if hit_vertical:
+            blk_v = _block_across_vertical_edge(board, mx, y, vy)
+            if blk_v:
+                interactions.append(("vertical", blk_v))
+        if hit_horizontal:
+            blk_h = _block_across_horizontal_edge(board, x, my, vx)
+            if blk_h:
+                interactions.append(("horizontal", blk_h))
 
     # apply interactions sequentially, could branch (for refract)
     beams: List[Tuple[int, int]] = [(vx, vy)]
@@ -186,11 +221,17 @@ def simulate_board(board: Board) -> Set[Tuple[int, int]]:
         hit_points.add((new_x, new_y))
 
         # 边界检查（基于棋盘大小的宽松范围）
+        # 一旦离开棋盘区域，立即终止这条光束，不再入队
         if new_y < -10 or new_y > board.nrows * 2 + 10 or new_x < -10 or new_x > board.ncols * 2 + 10:
-            continue
+            continue  # 已离开棋盘，不再处理
 
-        # 分支后的光束入队
+        # 分支后的光束入队（只在棋盘内）
         for vx, vy in out_dirs:
+            # 如果新方向也会立即离开棋盘，跳过
+            next_x, next_y = new_x + vx, new_y + vy
+            if next_y < -10 or next_y > board.nrows * 2 + 10 or next_x < -10 or next_x > board.ncols * 2 + 10:
+                continue
+            
             state_key = (new_x, new_y, vx, vy)
             if state_key in visited_states:
                 continue

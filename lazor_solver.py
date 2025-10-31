@@ -35,8 +35,13 @@ def format_board_with_solution(board: Board) -> str:
                 }[block.kind])
             else:
                 ch = board.grid[r][c]
-                if isinstance(ch, str) and ch.lower() in ("a","b","c"):
-                    row.append(ch.upper())
+                if isinstance(ch, str):
+                    if ch.lower() in ("a", "d"):
+                        row.append("A")  # 两种朝向都显示为 A
+                    elif ch.lower() in ("b", "c"):
+                        row.append(ch.upper())
+                    else:
+                        row.append(ch)
                 else:
                     row.append(ch)
         result.append(" ".join(row))

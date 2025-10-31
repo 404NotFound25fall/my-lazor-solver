@@ -65,8 +65,12 @@ class Board:
                 if upper in {'O', 'X'}:
                     new_row.append(upper.lower())
                 elif upper in {'A', 'B', 'C'}:
-                    # Treat fixed block cell as non-placeable 'x' in the base grid
-                    new_row.append('x')
+                    if upper == 'A':
+                        new_row.append('a')
+                    elif upper == 'B':
+                        new_row.append('b')
+                    elif upper == 'C':
+                        new_row.append('c')
                     fixed[(r, c)] = Block(kind=BlockType.from_letter(upper), r=r, c=c)
                 else:
                     raise ValueError(f"Unknown grid token '{tok}' at ({r}, {c}). Expected o/x/A/B/C.")

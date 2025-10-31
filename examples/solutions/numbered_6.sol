@@ -1,11 +1,13 @@
 # Solved Board Configuration
 GRID START
-A B o
-A o A
-o C o
+o A A
+o x x
+o A o
+o x o
+o o o
 GRID STOP
 
 # Verify
-# Targets: [(1, 2), (6, 3)]
+# Targets: [(2, 5), (5, 0)]
 # Hit OK: True
-# Time(s): 0.059
+# Time(s): 0.035
